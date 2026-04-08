@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; font-size: 12.5px; background: #eef2f7; padding: 16px; color: #1e293b; }
+h1 { text-align: center; color: #1e3a5f; margin-bottom: 6px; font-size: 19px; }
+.verified { text-align:center; font-size:11px; color:#166534; background:#dcfce7; padding:4px; border-radius:4px; margin-bottom:14px; }
+.card { background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.09); padding: 18px; margin-bottom: 22px; }
+.asset-title { font-size: 15px; font-weight: 700; color: #1e3a5f; border-bottom: 2px solid #3b82f6; padding-bottom: 7px; margin-bottom: 14px; }
+.sec-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: #fff; padding: 4px 10px; border-radius: 4px; display: inline-block; margin: 12px 0 7px; background: #334155; }
+.sec-label.sells { background: #166534; }
+.sec-label.exch  { background: #7c3aed; }
+.sec-label.pnl   { background: #b45309; }
+.sec-label.ov    { background: #0e7490; }
+.sec-label.warn  { background: #b91c1c; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #1e3a5f; color: #fff; padding: 7px 9px; text-align: right; font-size: 11.5px; }
+th:first-child { text-align: left; }
+td { padding: 5px 9px; border-bottom: 1px solid #e2e8f0; text-align: right; }
+td:first-child { text-align: left; }
+tr:hover td { background: #f0f7ff; }
+.t-buy  td { background: #dbeafe; font-weight: 700; border-top: 2px solid #3b82f6; }
+.t-sell td { background: #dcfce7; font-weight: 700; border-top: 2px solid #16a34a; }
+.t-exch td { background: #f3e8ff; font-weight: 700; border-top: 2px solid #7c3aed; }
+.t-pnl  td { background: #fef3c7; font-weight: 700; border-top: 2px solid #ca8a04; }
+.t-ov   td { background: #e0f2fe; font-weight: 700; border-top: 2px solid #0e7490; }
+.tag { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 3px; }
+.tag-sol { background: #fef9c3; color: #713f12; }
+.tag-ada { background: #ede9fe; color: #5b21b6; }
+.corr-row td { background: #fff1f2; color: #9f1239; font-size: 10px; padding: 2px 9px; font-style: italic; }
+.info-box { margin-top: 8px; padding: 7px 10px; background: #f0f7ff; border-left: 3px solid #3b82f6; border-radius: 4px; font-size: 11.5px; }
+.note { font-size: 10.5px; color: #64748b; margin-top: 5px; font-style: italic; }
+.profit { color: #16a34a; font-weight: 700; }
+.loss   { color: #dc2626; font-weight: 700; }
+.ov-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin: 12px 0 6px; }
+.ov-cell { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; text-align: center; }
+.ov-lbl  { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+.ov-val  { font-size: 15px; font-weight: 700; color: #1e3a5f; }
+.corr-badge { display:inline-block; background:#fef2f2; color:#b91c1c; border:1px solid #fca5a5; border-radius:3px; font-size:9px; padding:1px 4px; margin-left:4px; font-weight:700; }
+</style>
+</head>
+<body>
+<h1>🪙 Crypto Portfolio — VWAP, P&L & Holdings (ZAR)</h1>
+<div class="verified">✅ Verified against official Luno BTC, ETH, ADA, SOL & ZAR statements + Kraken Oct–Nov 2021 statement</div>
+<div id="root"></div>
+<script>
+const R  = v => 'R\u00a0' + (+v).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2});
+const N6 = v => (+v).toFixed(6);
+const PL = v => `<span class="${v>=0?'profit':'loss'}">${v>=0?'+':''}${R(v)}</span>`;
+
+// ── Live prices (8 Apr 2026, CoinGecko / Investing.com) ──
+const BTC_PRICE = 1140688;
+const ETH_PRICE = 37937.65;
+
+// VWAP = Σ(ZAR·price) / Σ(ZAR) — arithmetic weighted mean
+function calcVwap(rows) {
+  const tot = rows.reduce((s,r)=>s+r.zar,0);
+  return { total:tot, vwap: rows.reduce((s,r)=>s+r.zar*r.price,0)/tot,
+           rows: rows.map(r=>({...r, contrib:r.zar*r.price/tot})) };
+}
+// True WAC = Total ZAR / Total actual units received (for P&L)
+function trueWAC(rows) {
+  const z=rows.reduce((s,r)=>s+r.zar,0), u=rows.reduce((s,r)=>s+r.qty,0);
+  return {zar:z, qty:u, wac:z/u};
+}
+
+// ══════════════ DATA — VERIFIED FROM LUNO STATEMENTS ══════════════
+
+const btcBuys = [
+  {date:'4 May 2020',    zar:5000,  qty:0.0287074},
+  {date:'13 Jan 2021',   zar:100,   qty:0.00018102},
+  {date:'11 Feb 2021',   zar:2500,  qty:0.00345699},
+  {date:'13 Feb 2021',   zar:5000,  qty:0.00695808},
+  {date:'02 Mar 2021',   zar:2400,  qty:0.00311052},
+  {date:'18 Sep 2021',   zar:2500,  qty:0.00332375, swap:'ADA'},
+  {date:'21 Sep 2021',   zar:2500,  qty:0.00377305},
+  {date:'26 Sep 2021',   zar:2500,  qty:0.0036917},
+  {date:'02 Oct 2021',   zar:2500,  qty:0.003383},
+  {date:'05 Oct 2021',   zar:3000,  qty:0.00383474},
+  {date:'06 Oct 2021',   zar:7500,  qty:0.00888716},
+  {date:'09 Oct 2021',   zar:37000, qty:0.04312377},
+  {date:'09 Oct 2021',   zar:13000, qty:0.01515145},
+  {date:'27 Oct 2021',   zar:100,   qty:0.00010835, swap:'SOL'},
+  {date:'27 Oct 2021',   zar:100,   qty:0.00010825, swap:'SOL'},
+  {date:'28 Oct 2021',   zar:1000,  qty:0.00103963, swap:'SOL'},
+  {date:'29 Oct 2021',   zar:2500,  qty:0.00258906, swap:'SOL'},
+  {date:'30 Oct 2021',   zar:2500,  qty:0.00256932, swap:'SOL'},
+  {date:'30 Oct 2021',   zar:2500,  qty:0.00256655, swap:'SOL'},
+  {date:'30 Oct 2021',   zar:2800,  qty:0.00288119, swap:'SOL'},
+  {date:'09 Nov 2021',   zar:7000,  qty:0.00662466, swap:'ADA'},
+  {date:'15 May 2022',   zar:2000,  qty:0.00392369},
+  {date:'19 Dec 2023',   zar:10000, qty:0.01213657},
+  {date:'19 Dec 2023',   zar:40500, qty:0.04974691},
+];
+btcBuys.forEach(r => r.price = r.zar / r.qty);
+
+const btcSells = [
+  {date:'17 Dec 2023', zar:99.98,     qty:0.00012929},
+  {date:'16 Jul 2025', zar:1055.92,   qty:0.0005056},
+  {date:'18 Nov 2025', zar:494.21,    qty:0.00031456},
+  {date:'18 Nov 2025', zar:117478.93, qty:0.07492123},
+];
+btcSells.forEach(r => r.price = r.zar / r.qty);
+
+const btcExch = [
+  {date:'18 Sep 2021',   zarSent:2452.90, btcQty:0.00332375, to:'ADA', rcvd:null,    note:'BTC sent via personal wallet to ADA — conversion platform unknown'},
+  {date:'27 Oct 2021',   zarSent:196.23,  btcQty:0.0002166,  to:'SOL', rcvd:141.53,  note:'Kraken: 0.0611 SOL received, 0.0511 net after 0.01 fee'},
+  {date:'28 Oct 2021',   zarSent:979.32,  btcQty:0.00103963, to:'SOL', rcvd:918.43,  note:'Kraken: 0.3109 SOL received, 0.3009 net'},
+  {date:'29 Oct 2021',   zarSent:2449.88, btcQty:0.00258906, to:'SOL', rcvd:2329.84, note:'Kraken: 0.7927 SOL received, 0.7827 net'},
+  {date:'30 Oct 2021',   zarSent:2447.94, btcQty:0.00256932, to:'SOL', rcvd:2323.00, note:'Kraken: 0.7904 SOL received, 0.7804 net'},
+  {date:'30 Oct 2021',   zarSent:2445.93, btcQty:0.00256655, to:'SOL', rcvd:2317.00, note:'Kraken: 0.7884 SOL received, 0.7784 net'},
+  {date:'02 Nov 2021',   zarSent:2750.76, btcQty:0.00288119, to:'SOL', rcvd:2930.00, note:'Kraken: BTC deposited 30 Oct, converted 2 Nov; 0.8736 received, 0.8636 net'},
+  {date:'09 Nov 2021',   zarSent:6831.97, btcQty:0.00662466, to:'ADA', rcvd:6490,    note:'Kraken: 0.003 BTC→87.03 ADA (86.03 net) + 0.0036 BTC→104.52 ADA (103.52 net)'},
+];
+
+const ethBuys = [{date:'17 Oct 2021', zar:11000, qty:0.18508125}];
+ethBuys.forEach(r => r.price = r.zar / r.qty);
+
+const ethSells = [
+  {date:'17 Nov 2025', zar:97.52,   qty:0.00188121},
+  {date:'17 Nov 2025', zar:8547.87, qty:0.16659249},
+];
+ethSells.forEach(r => r.price = r.zar / r.qty);
+
+const solAcq = [
+  {date:'27 Oct 2021',  btcCost:196.23,  solQty:0.0511},
+  {date:'28 Oct 2021',  btcCost:979.32,  solQty:0.3009},
+  {date:'29 Oct 2021',  btcCost:2449.88, solQty:0.7827},
+  {date:'30 Oct 2021',  btcCost:2447.94, solQty:0.7804},
+  {date:'30 Oct 2021',  btcCost:2445.93, solQty:0.7784},
+  {date:'02 Nov 2021',  btcCost:2750.76, solQty:0.8636},
+];
+
+const solSells = [
+  {date:'17 Nov 2025', zar:97.29,   qty:0.04387408},
+  {date:'17 Nov 2025', zar:7777.45, qty:3.51311323},
+];
+solSells.forEach(r => r.price = r.zar / r.qty);
+
+const adaAcq = [
+  {date:'18 Sep 2021',  btcCost:2452.90, adaQty:null,      rcvdZAR:null,   note:'BTC FMV at send R2,452.90. ADA qty unconfirmed (~46.8 est.)'},
+  {date:'09 Nov 2021',  btcCost:6831.97, adaQty:189.5534,  rcvdZAR:6490,   note:'Kraken: 86.03 + 103.52 ADA (net after 1 ADA fee each)'},
+  {date:'16 Jul 2025',  btcCost:0,       adaQty:14.792899, rcvdZAR:201.41, note:'Luno Savings — STAKING/INTEREST REWARD (cost basis = R201.41 at receipt)'},
+];
+
+const adaSells = [
+  {date:'16 Jul 2025', zar:197.09, qty:14.792899,  note:'Savings ADA'},
+  {date:'17 Nov 2025', zar:932.06, qty:118.263119},
+  {date:'18 Nov 2025', zar:947.01, qty:118.093499},
+];
+adaSells.forEach(r => r.price = r.zar / r.qty);
+
+// ══════════════ P&L CALCULATIONS (WAC METHOD) ══════════════
+const btcW = trueWAC(btcBuys);
+const ethW = trueWAC(ethBuys);
+const BTC_WAC = btcW.wac, ETH_WAC = ethW.wac;
+
+const btcSellQty  = btcSells.reduce((s,r)=>s+r.qty,0);
+const btcSellProc = btcSells.reduce((s,r)=>s+r.zar,0);
+const btcSellCost = btcSellQty * BTC_WAC;
+const btcSellPnL  = btcSellProc - btcSellCost;
+
+const btcSOLQty  = btcBuys.filter(r=>r.swap==='SOL').reduce((s,r)=>s+r.qty,0);
+const btcSOLSent = btcExch.filter(r=>r.to==='SOL').reduce((s,r)=>s+r.zarSent,0);
+const btcSOLCost = btcSOLQty * BTC_WAC;
+const btcSOLPnL  = btcSOLSent - btcSOLCost;
+
+const btcADAQty  = btcBuys.filter(r=>r.swap==='ADA').reduce((s,r)=>s+r.qty,0);
+const btcADASent = btcExch.filter(r=>r.to==='ADA').reduce((s,r)=>s+r.zarSent,0);
+const btcADACost = btcADAQty * BTC_WAC;
+const btcADAPnL  = btcADASent - btcADACost;
+
+const btcRealPnL = btcSellPnL + btcSOLPnL + btcADAPnL;
+
+const btcRemQty  = btcW.qty - btcSellQty - btcSOLQty - btcADAQty;
+const btcRemCost = btcRemQty * BTC_WAC;
+const btcRemVal  = btcRemQty * BTC_PRICE;
+const btcUnrPnL  = btcRemVal - btcRemCost;
+
+const ethSellQty  = ethSells.reduce((s,r)=>s+r.qty,0);
+const ethSellProc = ethSells.reduce((s,r)=>s+r.zar,0);
+// FIX: cost basis is total ETH purchase cost (ethW.zar = R11,000), not proceeds
+const ethSellPnL  = ethSellProc - ethW.zar;
+const ethRemQty   = 0;
+
+const solTotalCost = solAcq.reduce((s,r)=>s+r.btcCost,0);
+const solTotalQty  = solAcq.reduce((s,r)=>s+r.solQty,0);
+const solProc      = solSells.reduce((s,r)=>s+r.zar,0);
+const solPnL       = solProc - solTotalCost;
+
+const adaBTCCost   = btcExch.filter(r=>r.to==='ADA').reduce((s,r)=>s+r.zarSent,0);
+const adaSavCost   = 201.41;
+const adaTotalCost = adaBTCCost + adaSavCost;
+const adaProc      = adaSells.reduce((s,r)=>s+r.zar,0);
+// FIX: derive savings proceeds from the data rather than hardcoding 197.09
+const adaSavProc   = adaSells.filter(r=>r.note==='Savings ADA').reduce((s,r)=>s+r.zar,0);
+const adaPnL       = adaProc - adaTotalCost;
+
+const totalRealPnL = btcRealPnL + ethSellPnL + solPnL + adaPnL;
+const totalRemVal  = btcRemVal;
+const totalUnrPnL  = btcUnrPnL;
+
+// ══════════════ RENDER HELPERS ══════════════
+function buysTable(rows, sym) {
+  const {total, vwap, rows:r} = calcVwap(rows);
+  const {qty:totalQty, wac} = trueWAC(rows);
+  return `<div class="sec-label">PURCHASES</div>
+  <table><thead><tr>
+    <th>DATE</th><th>RANDS SPENT</th><th>${sym} RECEIVED (actual)</th><th>EFFECTIVE PRICE (ZAR/${sym})</th><th>VWAP CONTRIBUTION</th>
+  </tr></thead><tbody>
+  ${r.map(row=>`<tr>
+    <td>${row.date}${row.swap?`<span class="tag tag-${row.swap.toLowerCase()}">→${row.swap}</span>`:''}</td>
+    <td>${R(row.zar)}</td><td>${N6(row.qty)} ${sym}</td>
+    <td>${R(row.price)}</td><td>${R(row.contrib)}</td>
+  </tr>`).join('')}
+  <tr class="t-buy"><td>TOTAL</td><td>${R(total)}</td>
+    <td>${N6(totalQty)} ${sym}</td>
+    <td colspan="2">Arithmetic VWAP = ${R(vwap)} / ${sym} &nbsp;|&nbsp; <b>True WAC = ${R(wac)} / ${sym}</b></td>
+  </tr></tbody></table>`;
+}
+
+function sellsTable(rows, sym) {
+  const {total, vwap, rows:r} = calcVwap(rows);
+  const totalQty = rows.reduce((s,row)=>s+row.qty,0);
+  return `<div class="sec-label sells">SELLS</div>
+  <table><thead><tr>
+    <th>DATE</th><th>RANDS RECEIVED</th><th>${sym} SOLD (actual)</th><th>EFFECTIVE PRICE (ZAR/${sym})</th><th>VWAP CONTRIBUTION</th>
+  </tr></thead><tbody>
+  ${r.map(row=>`<tr>
+    <td>${row.date}${row.note?` <span class="corr-badge">★ ${row.note}</span>`:''}</td>
+    <td>${R(row.zar)}</td><td>${N6(row.qty)} ${sym}</td>
+    <td>${R(row.price)}</td><td>${R(row.contrib)}</td>
+  </tr>`).join('')}
+  <tr class="t-sell"><td>TOTAL</td><td>${R(total)}</td>
+    <td>${N6(totalQty)} ${sym}</td>
+    <td colspan="2">Avg Sell VWAP = ${R(vwap)} / ${sym}</td>
+  </tr></tbody></table>`;
+}
+
+function exchTable(rows) {
+  const tS = rows.reduce((s,r)=>s+r.zarSent,0);
+  const tR = rows.reduce((s,r)=>s+(r.rcvd||0),0);
+  return `<div class="sec-label exch">BTC EXCHANGES → Other Crypto (Luno send values + Kraken data)</div>
+  <table><thead><tr>
+    <th>DATE</th><th>BTC ZAR VALUE AT SEND</th><th>BTC QTY</th><th>TO</th><th>RECEIVED VALUE (ZAR)</th><th>SOURCE NOTES</th>
+  </tr></thead><tbody>
+  ${rows.map(r=>`<tr>
+    <td>${r.date}</td><td>${R(r.zarSent)}</td><td>${N6(r.btcQty)}</td>
+    <td><span class="tag tag-${r.to.toLowerCase()}">${r.to}</span></td>
+    <td>${r.rcvd!==null?R(r.rcvd):'<i style="color:#94a3b8">Unconfirmed</i>'}</td>
+    <td style="font-size:10.5px;color:#475569">${r.note}</td>
+  </tr>`).join('')}
+  <tr class="t-exch"><td>TOTAL</td><td>${R(tS)}</td><td></td><td></td>
+    <td>${R(tR)} <span style="font-size:10px;font-weight:normal">(excl. unconfirmed)</span></td><td></td></tr>
+  </tbody></table>`;
+}
+
+function solTable() {
+  const totalCost = solAcq.reduce((s,r)=>s+r.btcCost,0);
+  const totalQty  = solAcq.reduce((s,r)=>s+r.solQty,0);
+  return `<div class="sec-label exch">ACQUISITIONS via Kraken (BTC→SOL)</div>
+  <table><thead><tr>
+    <th>DATE</th><th>BTC ZAR VALUE SENT</th><th>SOL RECEIVED (net, Kraken)</th><th>EST. ZAR/SOL</th>
+  </tr></thead><tbody>
+  ${solAcq.map(r=>`<tr>
+    <td>${r.date}</td><td>${R(r.btcCost)}</td><td>${r.solQty.toFixed(4)} SOL</td>
+    <td>${R(r.btcCost/r.solQty)}</td>
+  </tr>`).join('')}
+  <tr class="t-exch"><td>TOTAL</td><td>${R(totalCost)}</td>
+    <td>${totalQty.toFixed(4)} SOL</td>
+    <td>${R(totalCost/totalQty)} / SOL</td></tr>
+  </tbody></table>
+  <div class="info-box">SOL cost basis (BTC FMV at swap): ${R(totalCost)} for ${totalQty.toFixed(4)} SOL = <b>${R(totalCost/totalQty)} / SOL</b></div>`;
+}
+
+function adaTable() {
+  return `<div class="sec-label exch">ACQUISITIONS (BTC→ADA via Kraken + Luno Savings)</div>
+  <table><thead><tr>
+    <th>DATE</th><th>BTC COST / COST BASIS</th><th>ADA RECEIVED</th><th>NOTES</th>
+  </tr></thead><tbody>
+  ${adaAcq.map(r=>`<tr>
+    <td>${r.date}</td>
+    <td>${r.btcCost>0?R(r.btcCost):'—'} ${r.rcvdZAR?`/ received ${R(r.rcvdZAR)}`:''}
+        ${r.btcCost===0?`<b>Cost basis: ${R(r.rcvdZAR)} (receipt value)</b>`:''}</td>
+    <td>${r.adaQty?r.adaQty.toFixed(4)+' ADA':'Est. ~46.8 ADA'}</td>
+    <td style="font-size:10.5px;color:#475569">${r.note}</td>
+  </tr>`).join('')}
+  </tbody></table>
+  <div class="info-box">
+    Total ADA cost basis: BTC-derived ${R(adaBTCCost)} + Savings ${R(adaSavCost)} = <b>${R(adaTotalCost)}</b> &nbsp;|&nbsp;
+    Total ADA sold: ${adaSells.reduce((s,r)=>s+r.qty,0).toFixed(4)} ADA
+  </div>
+  <div class="note">⚠ Sep 2021 ADA: converted via personal wallet (bc1q95...), not Kraken — conversion platform and exact ADA qty unconfirmed (~46.8 est.). The 14.79 ADA from Luno Savings is likely staking/interest income (cost basis = ZAR value at receipt = R201.41).</div>`;
+}
+
+function pnlTable(events, realPnL, remQty, remCost, remVal, sym, note) {
+  const unrPnL = remQty>0 ? remVal-remCost : null;
+  let html = `<div class="sec-label pnl">PROFIT & LOSS (WAC Method)</div>
+  <table><thead><tr><th>EVENT</th><th>PROCEEDS (ZAR)</th><th>COST BASIS (ZAR)</th><th>REALIZED P&L</th></tr></thead>
+  <tbody>${events.map(e=>`<tr>
+    <td>${e.label}</td><td>${R(e.proc)}</td><td>${R(e.cost)}</td><td>${PL(e.proc-e.cost)}</td>
+  </tr>`).join('')}
+  <tr class="t-pnl"><td colspan="2">TOTAL REALIZED P&L</td><td></td><td>${PL(realPnL)}</td></tr>
+  </tbody></table>`;
+  if (remQty>0) {
+    html += `<table style="margin-top:8px"><thead><tr>
+      <th>REMAINING</th><th>QUANTITY</th><th>WAC COST BASIS</th><th>CURRENT VALUE</th><th>UNREALIZED P&L</th>
+    </tr></thead><tbody><tr>
+      <td>${sym}</td><td>${N6(remQty)} ${sym}</td><td>${R(remCost)}</td><td>${R(remVal)}</td><td>${PL(unrPnL)}</td>
+    </tr></tbody></table>`;
+  } else {
+    html += `<div class="note" style="margin-top:6px">✓ No remaining ${sym} holdings — fully disposed.</div>`;
+  }
+  if (note) html += `<div class="note" style="margin-top:4px">${note}</div>`;
+  return html;
+}
+
+function overviewCard() {
+  return `<div class="card">
+  <div class="asset-title">📊 Portfolio Overview — 8 April 2026</div>
+
+  <div class="sec-label warn">KEY CORRECTIONS FROM OFFICIAL STATEMENTS</div>
+  <table><thead><tr><th>ITEM</th><th>ORIGINAL (from handwritten notes)</th><th>CORRECTED (from Luno/Kraken)</th></tr></thead>
+  <tbody>
+    <tr><td>BTC effective prices</td><td>Market spot prices quoted</td><td>Actual execution prices (ZAR ÷ BTC received) — Luno applies a spread</td></tr>
+    <tr><td>BTC True WAC</td><td>R724,151/BTC</td><td class="profit"><b>R${Math.round(BTC_WAC).toLocaleString('en-ZA')}/BTC</b> (using actual BTC quantities)</td></tr>
+    <tr><td>ETH remaining</td><td>0.023558 ETH (~R894)</td><td class="loss"><b>0 ETH — Luno closing balance = R0.00</b> (0.01661 ETH lost to network fees)</td></tr>
+    <tr><td>SOL first sell</td><td>R97.92</td><td><b>R97.29</b> (per Luno SOL + ZAR statements)</td></tr>
+    <tr><td>ADA Jul 2025 (14.79 ADA)</td><td>Treated as BTC-derived</td><td><b>From Luno Savings</b> — staking/interest (cost basis = R201.41 at receipt)</td></tr>
+    <tr><td>ADA total qty</td><td>246.49 ADA (calculated)</td><td><b>251.15 ADA</b> (14.79 + 118.26 + 118.09 — actual Luno amounts)</td></tr>
+    <tr><td>BTC exchange values</td><td>Round ZAR figures</td><td>Actual Luno ZAR values at time of BTC send to Kraken</td></tr>
+  </tbody></table>
+
+  <div class="ov-grid" style="margin-top:14px">
+    <div class="ov-cell"><div class="ov-lbl">Total ZAR Invested</div><div class="ov-val">${R(btcW.zar+ethW.zar)}</div></div>
+    <div class="ov-cell"><div class="ov-lbl">Current Holdings Value</div><div class="ov-val">${R(totalRemVal)}</div></div>
+    <div class="ov-cell"><div class="ov-lbl">Total Realized P&L</div><div class="ov-val ${totalRealPnL>=0?'profit':'loss'}">${totalRealPnL>=0?'+':''}${R(totalRealPnL)}</div></div>
+    <div class="ov-cell"><div class="ov-lbl">Unrealized P&L (BTC only)</div><div class="ov-val ${totalUnrPnL>=0?'profit':'loss'}">${totalUnrPnL>=0?'+':''}${R(totalUnrPnL)}</div></div>
+  </div>
+
+  <div class="sec-label ov" style="margin-top:12px">REMAINING HOLDINGS</div>
+  <table><thead><tr><th>ASSET</th><th>QUANTITY</th><th>TRUE WAC</th><th>COST BASIS</th><th>CURRENT PRICE</th><th>CURRENT VALUE</th><th>UNREALIZED P&L</th></tr></thead>
+  <tbody>
+    <tr><td><b>BTC</b></td><td>${N6(btcRemQty)} BTC</td><td>${R(BTC_WAC)}</td><td>${R(btcRemCost)}</td><td>${R(BTC_PRICE)}</td><td>${R(btcRemVal)}</td><td>${PL(btcUnrPnL)}</td></tr>
+    <tr><td><b>ETH</b></td><td>0 ETH</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td><b>SOL</b></td><td>0 SOL</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td><b>ADA</b></td><td>0 ADA</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr class="t-ov"><td>TOTAL</td><td></td><td></td><td>${R(btcRemCost)}</td><td></td><td>${R(totalRemVal)}</td><td>${PL(totalUnrPnL)}</td></tr>
+  </tbody></table>
+
+  <div class="sec-label ov" style="margin-top:12px">REALIZED P&L BY ASSET</div>
+  <table><thead><tr><th>ASSET</th><th>TOTAL PROCEEDS</th><th>TOTAL COST BASIS</th><th>REALIZED P&L</th></tr></thead>
+  <tbody>
+    <tr><td><b>BTC</b> (sells + swaps out — WAC method)</td>
+      <td>${R(btcSellProc+btcSOLSent+btcADASent)}</td>
+      <td>${R(btcSellCost+btcSOLCost+btcADACost)}</td><td>${PL(btcRealPnL)}</td></tr>
+    <tr><td><b>ETH</b> (fully sold incl. network fees)</td>
+      <td>${R(ethSellProc)}</td><td>${R(ethW.zar)}</td><td>${PL(ethSellPnL)}</td></tr>
+    <tr><td><b>SOL</b> (cost = BTC FMV at Kraken swap)</td>
+      <td>${R(solProc)}</td><td>${R(solTotalCost)}</td><td>${PL(solPnL)}</td></tr>
+    <tr><td><b>ADA</b> (BTC FMV + savings receipt value)</td>
+      <td>${R(adaProc)}</td><td>${R(adaTotalCost)}</td><td>${PL(adaPnL)}</td></tr>
+    <tr class="t-ov"><td>TOTAL REALIZED</td><td></td><td></td><td>${PL(totalRealPnL)}</td></tr>
+  </tbody></table>
+  <div class="note" style="margin-top:8px">Prices: BTC ${R(BTC_PRICE)} | ETH ${R(ETH_PRICE)} — 8 Apr 2026. WAC = Weighted Average Cost. All crypto→crypto swaps treated as CGT disposal events (SARS). Sep 2021 ADA qty is an estimate; once confirmed, ADA P&L may change slightly.</div>
+</div>`;
+}
+
+document.getElementById('root').innerHTML =
+  overviewCard() +
+  `<div class="card">
+    <div class="asset-title">₿ BITCOIN (BTC) &nbsp;<span style="font-size:12px;font-weight:normal;color:#64748b">True WAC = ${R(BTC_WAC)}/BTC &nbsp;|&nbsp; Total purchased: ${N6(btcW.qty)} BTC</span></div>
+    ${buysTable(btcBuys,'BTC')}
+    ${sellsTable(btcSells,'BTC')}
+    ${exchTable(btcExch)}
+    ${pnlTable([
+      {label:'Direct sells (BTC→ZAR)', proc:btcSellProc, cost:btcSellCost},
+      {label:'BTC→SOL (FMV proceeds = Luno ZAR at send)', proc:btcSOLSent, cost:btcSOLCost},
+      {label:'BTC→ADA (FMV proceeds = Luno ZAR at send)', proc:btcADASent, cost:btcADACost},
+    ], btcRealPnL, btcRemQty, btcRemCost, btcRemVal, 'BTC',
+    'Note: BTC sold on Luno was received from external wallet/Kraken after originally being sent there from Luno.')}
+  </div>
+  <div class="card">
+    <div class="asset-title">Ξ ETHEREUM (ETH) &nbsp;<span style="font-size:12px;font-weight:normal;color:#64748b">True WAC = ${R(ETH_WAC)}/ETH &nbsp;|&nbsp; Luno closing balance: 0.00 ETH</span></div>
+    ${buysTable(ethBuys,'ETH')}
+    ${sellsTable(ethSells,'ETH')}
+    ${pnlTable([
+      {label:'ETH sold (R97.52 + R8,547.87)', proc:ethSellProc, cost:ethW.zar},
+    ], ethSellPnL, 0, 0, 0, 'ETH',
+    '⚠ ETH P&L = Total proceeds R8,645.39 − Total cost R11,000 = −R2,354.61. Difference includes ~0.01661 ETH lost to Ethereum network send fees (irreversible gas cost) when transferring ETH in Oct 2021.')}
+  </div>
+  <div class="card">
+    <div class="asset-title">◎ SOLANA (SOL)</div>
+    ${solTable()}
+    ${sellsTable(solSells,'SOL')}
+    ${pnlTable([
+      {label:'SOL sold (cost = BTC FMV at Kraken swap)', proc:solProc, cost:solTotalCost},
+    ], solPnL, 0,0,0,'SOL',
+    '★ CORRECTION: First SOL sell was R97.29 (not R97.92 as in original notes). Confirmed by Luno SOL + ZAR statements. Total SOL sold: 3.556988.')}
+  </div>
+  <div class="card">
+    <div class="asset-title">₳ CARDANO (ADA)</div>
+    ${adaTable()}
+    ${sellsTable(adaSells,'ADA')}
+    ${pnlTable([
+      {label:'ADA sold — BTC-derived (236.36 ADA, cost = BTC FMV)', proc:adaProc-adaSavProc, cost:adaBTCCost},
+      {label:'ADA sold — Luno Savings / Staking (14.79 ADA)', proc:adaSavProc, cost:adaSavCost},
+    ], adaPnL, 0,0,0,'ADA',
+    '⚠ Sep 2021 ADA conversion (from bc1q95 wallet) — exact ADA qty unconfirmed (~46.8 est.). ADA from Luno Savings (14.79 ADA) is treated as income; cost basis = R201.41 (ZAR value at receipt).')}
+  </div>`;
+</script>
+</body>
+</html>

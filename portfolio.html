@@ -39,6 +39,10 @@ tr:hover td { background: #f0f7ff; }
 .ov-lbl  { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
 .ov-val  { font-size: 15px; font-weight: 700; color: #1e3a5f; }
 .corr-badge { display:inline-block; background:#fef2f2; color:#b91c1c; border:1px solid #fca5a5; border-radius:3px; font-size:9px; padding:1px 4px; margin-left:4px; font-weight:700; }
+.sec-label.cgt  { background: #0f766e; }
+.cgt-yr-hdr     { font-size:13px; font-weight:700; color:#1e3a5f; padding:6px 0 5px; border-bottom:2px solid #0f766e; margin-bottom:10px; }
+.cgt-summary    { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; margin-top:8px; }
+.highlight-box  { background:#fefce8; border:1px solid #fcd34d; border-radius:6px; padding:12px 14px; margin-top:10px; }
 </style>
 </head>
 <body>
@@ -201,6 +205,70 @@ const adaPnL       = adaProc - adaTotalCost;
 const totalRealPnL = btcRealPnL + ethSellPnL + solPnL + adaPnL;
 const totalRemVal  = btcRemVal;
 const totalUnrPnL  = btcUnrPnL;
+
+// ══════════════ SARS CGT CALCULATIONS ══════════════
+const ANNUAL_EXCL = 40000;
+const INCL_RATE   = 0.40;
+
+const adaExchList = btcExch.filter(r=>r.to==='ADA');
+const adaBuyList  = btcBuys.filter(r=>r.swap==='ADA');
+
+const cgtYears = [
+  { ty:'2022', period:'1 Mar 2021 – 28 Feb 2022',
+    events:[
+      { date:'18 Sep 2021', asset:'BTC → ADA swap (Luno send to personal wallet)',
+        proceeds:adaExchList[0].zarSent, cost:adaBuyList[0].qty*BTC_WAC,
+        note:'ADA qty unconfirmed (~46.8 ADA est.) — proceeds = BTC FMV at date of send' },
+      { date:'27 Oct–2 Nov 2021', asset:'BTC → SOL swaps ×6 (via Kraken)',
+        proceeds:btcSOLSent, cost:btcSOLCost, note:'' },
+      { date:'09 Nov 2021', asset:'BTC → ADA swap (via Kraken)',
+        proceeds:adaExchList[1].zarSent, cost:adaBuyList[1].qty*BTC_WAC, note:'' },
+    ]
+  },
+  { ty:'2024', period:'1 Mar 2023 – 28 Feb 2024',
+    events:[
+      { date:'17 Dec 2023', asset:'BTC → ZAR sell (Luno)',
+        proceeds:btcSells[0].zar, cost:btcSells[0].qty*BTC_WAC, note:'' },
+    ]
+  },
+  { ty:'2026', period:'1 Mar 2025 – 28 Feb 2026',
+    events:[
+      { date:'16 Jul 2025', asset:'BTC → ZAR sell (Luno)',
+        proceeds:btcSells[1].zar, cost:btcSells[1].qty*BTC_WAC, note:'' },
+      { date:'16 Jul 2025', asset:'ADA → ZAR sell — Luno Savings / staking (14.79 ADA)',
+        proceeds:adaSavProc, cost:adaSavCost,
+        note:'R\u00a0201,41 staking reward also declarable as gross income (ITR12 "other income")' },
+      { date:'17 Nov 2025', asset:'ETH → ZAR sell (fully disposed)',
+        proceeds:ethSellProc, cost:ethW.zar,
+        note:'Includes ~0.01661 ETH lost to Ethereum network fees (irreversible gas cost)' },
+      { date:'17 Nov 2025', asset:'SOL → ZAR sell (fully disposed)',
+        proceeds:solProc, cost:solTotalCost, note:'' },
+      { date:'17–18 Nov 2025', asset:'ADA → ZAR sell — BTC-derived (236.36 ADA)',
+        proceeds:adaProc-adaSavProc, cost:adaBTCCost, note:'' },
+      { date:'18 Nov 2025', asset:'BTC → ZAR sell ×2 (Luno)',
+        proceeds:btcSells[2].zar+btcSells[3].zar,
+        cost:(btcSells[2].qty+btcSells[3].qty)*BTC_WAC, note:'' },
+    ]
+  },
+];
+
+cgtYears.forEach(yr=>{
+  yr.events.forEach(e=>e.gain=e.proceeds-e.cost);
+  yr.netGain  = yr.events.reduce((s,e)=>s+e.gain, 0);
+  yr.afterExcl= yr.netGain>0 ? Math.max(0, yr.netGain-ANNUAL_EXCL) : 0;
+  yr.inclAmt  = yr.afterExcl*INCL_RATE;
+  yr.carryFwd = yr.netGain<0 ? Math.abs(yr.netGain) : 0;
+});
+
+const TAX_BRACKETS=[
+  {rate:0.18, label:'18%  (R\u00a00 – R\u00a0237,100)'},
+  {rate:0.26, label:'26%  (R\u00a0237,101 – R\u00a0370,500)'},
+  {rate:0.31, label:'31%  (R\u00a0370,501 – R\u00a0512,800)'},
+  {rate:0.36, label:'36%  (R\u00a0512,801 – R\u00a0673,000)'},
+  {rate:0.39, label:'39%  (R\u00a0673,001 – R\u00a0857,900)'},
+  {rate:0.41, label:'41%  (R\u00a0857,901 – R\u00a01,817,000)'},
+  {rate:0.45, label:'45%  (> R\u00a01,817,000)'},
+];
 
 // ══════════════ RENDER HELPERS ══════════════
 function buysTable(rows, sym) {
@@ -368,6 +436,88 @@ function overviewCard() {
 </div>`;
 }
 
+function cgtCard(){
+  const ty26 = cgtYears.find(y=>y.ty==='2026');
+  let html = `<div class="card">
+  <div class="asset-title">🏛 SARS Capital Gains Tax (CGT) — Disposal Summary</div>
+  <div class="note" style="margin-bottom:12px">
+    All crypto→crypto swaps and crypto→ZAR sales are CGT disposal events under SARS. WAC (weighted average cost) method used for cost basis throughout.
+    SARS tax year runs <b>1 March – last day of February</b>. Annual exclusion: <b>R\u00a040,000 / year</b>. Inclusion rate: <b>40%</b>.
+    The resulting "taxable capital gain" is added to total income and taxed at your marginal rate.
+    No disposals occurred in TY2023 (Mar 2022–Feb 2023) or TY2025 (Mar 2024–Feb 2025).
+  </div>`;
+
+  cgtYears.forEach(yr=>{
+    const exclUsed = yr.netGain>0 ? Math.min(yr.netGain, ANNUAL_EXCL) : 0;
+    html += `
+    <div style="margin-bottom:22px">
+      <div class="cgt-yr-hdr">Tax Year ${yr.ty}
+        <span style="font-weight:normal;color:#64748b;font-size:11px">&nbsp;&nbsp;(${yr.period})</span>
+      </div>
+      <table><thead><tr>
+        <th>DATE</th><th>DISPOSAL EVENT</th><th>PROCEEDS (ZAR)</th><th>COST BASIS (ZAR)</th><th>CAPITAL GAIN / (LOSS)</th>
+      </tr></thead><tbody>
+      ${yr.events.map(e=>`<tr>
+        <td style="white-space:nowrap">${e.date}</td>
+        <td>${e.asset}${e.note?`<br><span style="font-size:10px;color:#94a3b8;font-style:italic">${e.note}</span>`:''}</td>
+        <td>${R(e.proceeds)}</td><td>${R(e.cost)}</td><td>${PL(e.gain)}</td>
+      </tr>`).join('')}
+      <tr class="t-pnl"><td colspan="2"><b>NET CAPITAL GAIN / (LOSS) — TY${yr.ty}</b></td><td></td><td></td><td>${PL(yr.netGain)}</td></tr>
+      </tbody></table>
+      <div class="cgt-summary">
+        <table style="width:auto"><tbody>
+          <tr><td>Net capital gain / (loss)</td>
+              <td style="text-align:right;padding-left:36px">${PL(yr.netGain)}</td></tr>
+          <tr><td>Less: annual exclusion (R\u00a040,000)</td>
+              <td style="text-align:right;padding-left:36px">${yr.netGain>0?'( '+R(exclUsed)+' )':'—'}</td></tr>
+          <tr style="border-top:1px solid #cbd5e1"><td><b>Taxable capital gain (after exclusion)</b></td>
+              <td style="text-align:right;padding-left:36px"><b>${R(yr.afterExcl)}</b></td></tr>
+          <tr><td>× Inclusion rate (40%)</td>
+              <td style="text-align:right;padding-left:36px">× 40%</td></tr>
+          <tr style="border-top:1px solid #cbd5e1"><td><b>Amount added to taxable income</b></td>
+              <td style="text-align:right;padding-left:36px"><b class="${yr.inclAmt>0?'profit':''}">${yr.inclAmt>0?'+ ':''} ${R(yr.inclAmt)}</b></td></tr>
+          ${yr.carryFwd>0?`<tr><td style="color:#dc2626">Capital loss carried forward</td>
+              <td style="text-align:right;padding-left:36px;color:#dc2626">( ${R(yr.carryFwd)} )</td></tr>`:''}
+        </tbody></table>
+        ${yr.inclAmt===0&&yr.netGain>=0?`<div class="note" style="margin-top:5px">✓ Net gain (${R(yr.netGain)}) is below the R\u00a040,000 annual exclusion — <b>no CGT payable for TY${yr.ty}</b>.</div>`:''}
+        ${yr.carryFwd>0?`<div class="note" style="margin-top:5px">Net capital loss — no CGT payable. Loss carried forward to next year.</div>`:''}
+      </div>
+    </div>`;
+  });
+
+  html += `
+  <div class="sec-label cgt" style="margin-top:6px">TY2026 CGT PAYABLE — ESTIMATED TAX BY MARGINAL RATE</div>
+  <div class="highlight-box">
+    <div style="font-size:12px;margin-bottom:10px">
+      Net capital gain &nbsp;<b>${PL(ty26.netGain)}</b>
+      &nbsp;&minus;&nbsp; Annual exclusion &nbsp;<b>R\u00a040,000</b>
+      &nbsp;=&nbsp; Taxable gain &nbsp;<b>${R(ty26.afterExcl)}</b>
+      &nbsp;&times;&nbsp; 40% inclusion
+      &nbsp;=&nbsp; <b style="color:#0f766e">${R(ty26.inclAmt)} added to taxable income</b>
+    </div>
+    <table><thead><tr>
+      <th>MARGINAL INCOME TAX RATE (TY2026 brackets)</th>
+      <th>TAXABLE CAPITAL GAIN (inclusion amount)</th>
+      <th>ESTIMATED CGT TAX PAYABLE</th>
+    </tr></thead><tbody>
+    ${TAX_BRACKETS.map(b=>`<tr>
+      <td>${b.label}</td>
+      <td>${R(ty26.inclAmt)}</td>
+      <td><b>${R(ty26.inclAmt*b.rate)}</b></td>
+    </tr>`).join('')}
+    </tbody></table>
+    <div class="note" style="margin-top:8px">⚠ The ${R(ty26.inclAmt)} is added to your <i>total taxable income</i>. The rate that applies is your marginal rate on that incremental amount. Confirm final figures with a tax practitioner before submitting your ITR12.</div>
+  </div>
+
+  <div class="sec-label ov" style="margin-top:14px">INCOME TAX NOTE — STAKING REWARD (TY2026)</div>
+  <div class="info-box" style="margin-top:6px;font-size:12px">
+    The <b>R\u00a0201,41</b> received from Luno Savings on 16 Jul 2025 is likely taxable as <b>gross income</b> (not CGT) under s1 of the Income Tax Act — staking and interest rewards are treated as revenue receipts in the year of receipt. Declare as "other income" on your ITR12 for the 2026 tax year.
+  </div>
+  </div>`;
+
+  return html;
+}
+
 document.getElementById('root').innerHTML =
   overviewCard() +
   `<div class="card">
@@ -409,7 +559,8 @@ document.getElementById('root').innerHTML =
       {label:'ADA sold — Luno Savings / Staking (14.79 ADA)', proc:adaSavProc, cost:adaSavCost},
     ], adaPnL, 0,0,0,'ADA',
     '⚠ Sep 2021 ADA conversion (from bc1q95 wallet) — exact ADA qty unconfirmed (~46.8 est.). ADA from Luno Savings (14.79 ADA) is treated as income; cost basis = R201.41 (ZAR value at receipt).')}
-  </div>`;
+  </div>` +
+  cgtCard();
 </script>
 </body>
 </html>
